@@ -1,0 +1,7 @@
+database:
+  host: datasunrise01.aws2.teladoc.com
+  port: 3310
+  user:
+  password:
+  database: teladoc_eds
+
