@@ -1,6 +1,6 @@
 # ZotecReports
 
-A Python project to connect to MySQL database, execute queries from SQL files with dynamic date placeholders, export results to CSV files with specific formatting, and encrypt the files using GPG.
+A Python project to connect to MySQL database, execute queries from SQL files with dynamic date placeholders, export results to CSV or XML files with specific formatting, encrypt the files using GPG, and optionally upload to SFTP.
 
 ## Setup
 
@@ -38,43 +38,66 @@ A Python project to connect to MySQL database, execute queries from SQL files wi
      database: your_database
    ```
 
-2. The SQL files in `resources/` use `%START_DT%` and `%END_DT%` placeholders, which are automatically replaced with yesterday's date range (00:00:00 to 23:59:59).
+2. Update the SFTP configuration in `config.yaml`:
+   ```yaml
+   sftp:
+     host: your_sftp_host
+     port: 22
+     username: your_sftp_username
+     password: your_sftp_password
+   ```
 
-3. Queries are defined in the `QUERIES` list in `main.py`, each with 'name' and 'file' keys pointing to SQL files.
+3. The SQL files in `resources/` use placeholders like `%START_TS%`, `%END_TS%`, `%START_DT%`, `%END_DT%`, which are automatically replaced with appropriate date values (yesterday's dates).
+
+4. Queries are defined in the `QUERIES` list in `main.py`, each with keys like 'name', 'file', 'remote_dir', 'sep', 'filename_prefix', 'strftime', 'file_type'.
 
 ## Usage
 
-Run the script:
+Run the script with no arguments to execute all queries in local mode (no upload):
 ```
 python main.py
 ```
 
+Run the script with a query name to execute only that query in local mode:
+```
+python main.py visits
+python main.py payments
+python main.py claims
+```
+
+Run the script with a query name and upload mode ('local' or 'mft'):
+```
+python main.py visits local
+python main.py payments mft
+python main.py claims mft
+```
+
 The script will:
 - Connect to the MySQL database
-- Execute each query in sequence, replacing date placeholders
-- Export the results to timestamped CSV files in the `output/` directory
-- Encrypt each CSV file to a `.pgp` file using the GPG key
+- Execute the specified query(s), replacing date placeholders
+- Export the results to timestamped CSV or XML files in the `output/` directory based on 'file_type'
+- Encrypt each file to a `.pgp` file using the GPG key
+- If upload mode is 'mft', upload the encrypted `.pgp` file to the appropriate SFTP directory
 
 ## Output
 
-CSV files are created in the `output/` directory with specific naming:
+Files are created in the `output/` directory with specific naming:
 - For `visits`: `TDOC_core_visit_yyyyMMddHHmm.csv`
 - For `payments`: `TDOC_PatientPayments_yyyyMMdd_HHmmss.csv`
-- For others: `{query_name}_yyyyMMdd_HHmmss.csv`
+- For `claims`: `TDOC_core_charge_yyyyMMddHHmm.xml`
 
-Each CSV is encrypted to a corresponding `.pgp` file.
+Each file is encrypted to a corresponding `.pgp` file.
 
-CSV formatting:
-- Visits: Pipe-separated (`|`), all fields quoted
-- Payments: Comma-separated (`,`), all fields quoted
-- Null values: Left as blank
-- Line endings: `\r\n`
+Formatting:
+- CSV (visits, payments): Pipe-separated (`|`) or comma-separated (`,`), all fields quoted, nulls as blank, `\r\n` line endings
+- XML (claims): Standard XML format using etree parser
 
 ## Dependencies
 
 - mysql-connector-python: For MySQL database connection
-- pandas: For data manipulation and CSV export
+- pandas: For data manipulation and export
 - PyYAML: For configuration file parsing
+- paramiko: For SFTP upload
 
 ## GPG Encryption
 

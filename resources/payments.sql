@@ -1,6 +1,6 @@
--- Need to run this query on a daily basis by changin the start_dt & end_dt variables
-SET @start_dt = '%START_DT%';
-SET @end_dt = '%END_DT%';
+-- Need to run this query on a daily basis by changing the start_ts & end_ts variables
+SET @start_ts = '%START_TS%';
+SET @end_ts = '%END_TS%';
 
 -- Clean up the tmp table that holds any prior consults and invoices to process
 Delete from staging.tmp_process_zotec_member_payments;
@@ -15,7 +15,7 @@ FROM teladoc_eds.invoice_items ii
          LEFT JOIN teladoc_eds.group_settings gs ON c1.group_id = gs.group_id AND gs.exclusion_cd = 'IN'
 WHERE
     gs.consult_reimbursement_method_cd IN ('CONSULTREIMBURSEMENT_CLAIM','CONSULTREIMBURSEMENT_INFOCLAIM') AND  -- filter by info claim & claim configured consults
-    ip.updated_at BETWEEN @start_dt AND @end_dt
+    ip.updated_at BETWEEN @start_ts AND @end_ts
   AND c1.state_machine_cd = 'CONSULTSTATUS_COM';
 
 -- member payment extract for zotec
@@ -107,6 +107,4 @@ FROM (
      )mp
 ORDER BY patientmrn,transactiondate,dos,amount
 LIMIT 100000;
-
-
 

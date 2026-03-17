@@ -1,5 +1,5 @@
-SET @start_dt = '%START_DT%';
-SET @end_dt = '%END_DT%';
+SET @start_ts = '%START_TS%';
+SET @end_ts = '%END_TS%';
 
 SELECT
     ConsultID
@@ -312,7 +312,7 @@ FROM (
 
          WHERE gs.consult_reimbursement_method_cd IN ('CONSULTREIMBURSEMENT_CLAIM','CONSULTREIMBURSEMENT_INFOCLAIM') AND
              c.`state_machine_cd` = 'CONSULTSTATUS_COM' AND c.exclusion_cd = 'IN'
-           AND c.actual_start_dt BETWEEN @start_dt AND @end_dt  -- this field needs to be changed to c.updated_at during implementation
+           AND c.actual_start_dt BETWEEN @start_ts AND @end_ts  -- this field needs to be changed to c.updated_at during implementation
      )v
 ORDER BY ConsultID
 LIMIT 1000000

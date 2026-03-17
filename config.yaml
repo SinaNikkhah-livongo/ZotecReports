@@ -1,7 +1,12 @@
 database:
   host: datasunrise01.aws2.teladoc.com
   port: 3310
-  user:
+  user: 
   password:
   database: teladoc_eds
 
+sftp:
+  host: mft.teladoc.com
+  port: 22
+  username:
+  password:

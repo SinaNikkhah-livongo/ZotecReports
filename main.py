@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import yaml
 import csv
 import subprocess
+import sys
+import paramiko
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,16 +16,36 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 DB_CONFIG = config['database']
+SFTP_CONFIG = config['sftp']
 
 # List of queries to execute
 QUERIES = [
     {
         'name': 'visits',
-        'file': 'resources/visits.sql'
+        'file': 'resources/visits.sql',
+        'remote_dir': 'zotec_prod/outbound/Core/',
+        'sep': '|',
+        'filename_prefix': 'TDOC_core_visit_',
+        'strftime': '%Y%m%d%H%M',
+        'file_type': 'csv'
     },
     {
         'name': 'payments',
-        'file': 'resources/payments.sql'
+        'file': 'resources/payments.sql',
+        'remote_dir': 'zotec_prod/outbound/Payments/',
+        'sep': ',',
+        'filename_prefix': 'TDOC_PatientPayments_',
+        'strftime': '%Y%m%d_%H%M%S',
+        'file_type': 'csv'
+    },
+    {
+        'name': 'claims',
+        'file': 'resources/claims.sql',
+        'remote_dir': 'zotec_prod/outbound/Core/',
+        'sep': '|',
+        'filename_prefix': 'TDOC_core_charge_',
+        'strftime': '%Y%m%d%H%M',
+        'file_type': 'xml'
     },
     # Add more queries as needed
 ]
@@ -70,6 +92,15 @@ def export_to_csv(df, filename, sep):
         logging.error(f"Error exporting to CSV: {err}")
         raise
 
+def export_to_xml(df, filename):
+    """Export DataFrame to XML file."""
+    try:
+        df.to_xml(filename, index=False, parser='etree')
+        logging.info(f"Data exported to {filename}")
+    except Exception as err:
+        logging.error(f"Error exporting to XML: {err}")
+        raise
+
 def encrypt_file(filename):
     """Encrypt the file using GPG with the key from resources/zotec-prod.asc."""
     pgp_filename = filename + '.pgp'
@@ -102,8 +133,56 @@ def encrypt_file(filename):
         logging.error(f"Error encrypting file: {err}")
         raise
 
+def upload_file(pgp_filename, query_name):
+    """Upload the encrypted file to the SFTP server based on query name."""
+    try:
+        # Determine remote directory from query name
+        remote_dir = next((q['remote_dir'] for q in QUERIES if q['name'] == query_name), None)
+        if not remote_dir:
+            raise ValueError(f"No upload directory defined for query: {query_name}")
+
+        # Establish SFTP connection
+        transport = paramiko.Transport((SFTP_CONFIG['host'], SFTP_CONFIG['port']))
+        transport.connect(username=SFTP_CONFIG['username'], password=SFTP_CONFIG['password'])
+        sftp = paramiko.SFTPClient.from_transport(transport)
+
+        # Ensure remote directory exists
+        try:
+            sftp.listdir(remote_dir)
+        except IOError:
+            sftp.mkdir(remote_dir)
+
+        # Upload the file
+        remote_path = os.path.join(remote_dir, os.path.basename(pgp_filename)).replace('\\', '/')
+        sftp.put(pgp_filename, remote_path)
+
+        sftp.close()
+        transport.close()
+        logging.info(f"File uploaded to SFTP: {remote_path}")
+    except Exception as err:
+        logging.error(f"Error uploading file: {err}")
+        raise
+
 def main():
     """Main function to run the sequence of queries and export results."""
+    # Check for command-line arguments
+    query_to_run = None
+    upload_mode = 'local'  # default
+    if len(sys.argv) > 1:
+        query_to_run = sys.argv[1]
+    if len(sys.argv) > 2:
+        upload_mode = sys.argv[2]
+        if upload_mode not in ['local', 'mft']:
+            logging.error(f"Invalid upload mode: {upload_mode}. Use 'local' or 'mft'.")
+            return
+
+    queries_to_run = QUERIES
+    if query_to_run:
+        queries_to_run = [q for q in QUERIES if q['name'] == query_to_run]
+        if not queries_to_run:
+            logging.error(f"No query found with name: {query_to_run}")
+            return
+
     # Create output directory if it doesn't exist
     output_dir = 'output'
     os.makedirs(output_dir, exist_ok=True)
@@ -113,9 +192,13 @@ def main():
     try:
         conn = connect_to_db()
 
-        for query_info in QUERIES:
+        for query_info in queries_to_run:
             query_name = query_info['name']
             query_file = query_info['file']
+            sep = query_info['sep']
+            filename_prefix = query_info['filename_prefix']
+            strftime_format = query_info['strftime']
+            file_type = query_info['file_type']
 
             logging.info(f"Executing query: {query_name}")
 
@@ -124,28 +207,32 @@ def main():
                 query_sql = file.read()
 
             # Format query with dates if placeholders exist
-            if '%START_DT%' in query_sql and '%END_DT%' in query_sql:
-                # Calculate start_dt as yesterday at 00:00:00
-                yesterday = datetime.now() - timedelta(days=1)
-                start_dt = yesterday.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
-                # Calculate end_dt as yesterday at 23:59:59
-                end_dt = yesterday.replace(hour=23, minute=59, second=59, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
-                query_sql = query_sql.replace('%START_DT%', start_dt).replace('%END_DT%', end_dt)
+            yesterday = datetime.now() - timedelta(days=1)
+            start_ts = yesterday.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+            end_ts = yesterday.replace(hour=23, minute=59, second=59, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+            start_dt = yesterday.strftime('%Y%m%d')
+            end_dt = yesterday.strftime('%Y%m%d')
+            if query_name == 'claims':
+                end_ts = start_ts  # For claims, END_TS is also start_ts
+            query_sql = query_sql.replace('%START_TS%', start_ts).replace('%END_TS%', end_ts).replace('%START_DT%', start_dt).replace('%END_DT%', end_dt)
 
             # Execute query
             df = execute_query(conn, query_sql)
 
             # Generate filename
-            if query_name == 'visits':
-                filename = f"{output_dir}/TDOC_core_visit_{timestamp.strftime('%Y%m%d%H%M')}.csv"
-            elif query_name == 'payments':
-                filename = f"{output_dir}/TDOC_PatientPayments_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
-            else:
-                filename = f"{output_dir}/{query_name}_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
+            extension = '.csv' if file_type == 'csv' else '.xml'
+            filename = f"{output_dir}/{filename_prefix}{timestamp.strftime(strftime_format)}{extension}"
 
-            # Export to CSV
-            export_to_csv(df, filename, sep = '|' if query_name == 'visits' else ',')
+            # Export to CSV or XML
+            if file_type == 'csv':
+                export_to_csv(df, filename, sep)
+            elif file_type == 'xml':
+                export_to_xml(df, filename)
+
+            # Encrypt and upload
             encrypt_file(filename)
+            if upload_mode == 'mft':
+                upload_file(filename + '.pgp', query_name)
 
     except Exception as err:
         logging.error(f"An error occurred: {err}")
