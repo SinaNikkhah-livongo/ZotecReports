@@ -165,4 +165,5 @@ FROM
          claim.claim_process_log cpl
      WHERE business_date BETWEEN @business_start_ts AND @business_end_ts
        AND servicedt BETWEEN @service_start_dt AND @service_end_dt )z
-WHERE billingorgid IS NOT NULL;
+WHERE billingorgid IS NOT NULL
+ORDER BY consultid, servicedt;

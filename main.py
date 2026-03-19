@@ -92,10 +92,37 @@ def export_to_csv(df, filename, sep):
         logging.error(f"Error exporting to CSV: {err}")
         raise
 
-def export_to_xml(df, filename):
-    """Export DataFrame to XML file."""
+def export_to_xml(df, filename, date=None, datetime=None, record_count=None):
+    """Export DataFrame to custom XML format."""
     try:
-        df.to_xml(filename, index=False, parser='etree')
+        xml = '<?xml version="1.0" encoding="iso-8859-1"?>\n'
+        xml += '<Claims xmlns="http://TelaDoc.com">\n'
+        xml += '\t<File>"tmp_xml_837_intermediate.xml"</File>\n'
+        xml += f'\t<Date>{date}</Date>\n'
+        xml += f'\t<DateTime>{datetime}</DateTime>\n'
+        xml += f'\t<RecordCount>{record_count}</RecordCount>\n'
+        xml += '\t<SenderId>000000000</SenderId>\n'
+        xml += '\t<ReceiverId>000000000</ReceiverId>\n'
+        xml += '\t<ReceiverName>CUR</ReceiverName>\n'
+        xml += '\t<TransactionId>1</TransactionId>\n'
+        xml += '\t<Control>1</Control>\n'
+        xml += '\t<Header>\n'
+        xml += '\t\t<Columns>\n'
+        for col in df.columns:
+            xml += f'\t\t\t<Column name="{col}"/>\n'
+        xml += '\t\t</Columns>\n'
+        xml += '\t</Header>\n'
+        xml += '\t<Rows>\n'
+        for _, row in df.iterrows():
+            xml += '\t\t<Row>\n'
+            for col in df.columns:
+                value = str(row[col]) if pd.notna(row[col]) else ''
+                xml += f'\t\t\t<Column name="{col}">{value}</Column>\n'
+            xml += '\t\t</Row>\n'
+        xml += '\t</Rows>\n'
+        xml += '</Claims>\n'
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(xml)
         logging.info(f"Data exported to {filename}")
     except Exception as err:
         logging.error(f"Error exporting to XML: {err}")
@@ -187,7 +214,7 @@ def main():
     output_dir = 'output'
     os.makedirs(output_dir, exist_ok=True)
     # Get current timestamp for file naming
-    timestamp = datetime.now()
+    today_timestamp = datetime.now()
     conn = None
     try:
         conn = connect_to_db()
@@ -207,7 +234,7 @@ def main():
                 query_sql = file.read()
 
             # Format query with dates if placeholders exist
-            yesterday = datetime.now() - timedelta(days=1)
+            yesterday = today_timestamp - timedelta(days=1)
             start_ts = yesterday.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
             end_ts = yesterday.replace(hour=23, minute=59, second=59, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
             start_dt = yesterday.strftime('%Y%m%d')
@@ -221,13 +248,13 @@ def main():
 
             # Generate filename
             extension = '.csv' if file_type == 'csv' else '.xml'
-            filename = f"{output_dir}/{filename_prefix}{timestamp.strftime(strftime_format)}{extension}"
+            filename = f"{output_dir}/{filename_prefix}{today_timestamp.strftime(strftime_format)}{extension}"
 
             # Export to CSV or XML
             if file_type == 'csv':
                 export_to_csv(df, filename, sep)
             elif file_type == 'xml':
-                export_to_xml(df, filename)
+                export_to_xml(df, filename, date=yesterday.strftime('%Y-%m-%d'), datetime=yesterday.strftime('%Y-%m-%d %H:%M:%S'), record_count=len(df))
 
             # Encrypt and upload
             encrypt_file(filename)
