@@ -8,6 +8,7 @@ import csv
 import subprocess
 import sys
 import paramiko
+import html
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -117,6 +118,8 @@ def export_to_xml(df, filename, date=None, datetime=None, record_count=None):
             xml += '\t\t<Row>\n'
             for col in df.columns:
                 value = str(row[col]) if pd.notna(row[col]) else ''
+                # Escape XML entities in the value
+                value = html.escape(value)
                 xml += f'\t\t\t<Column name="{col}">{value}</Column>\n'
             xml += '\t\t</Row>\n'
         xml += '\t</Rows>\n'
@@ -246,6 +249,11 @@ def main():
             # Execute query
             df = execute_query(conn, query_sql)
 
+            if 'AccessionID' in df.columns:
+                df['AccessionID'] = df['AccessionID'].astype('Int64')
+
+            print("after correction\n")
+            print(df.dtypes)
             # Generate filename
             extension = '.csv' if file_type == 'csv' else '.xml'
             filename = f"{output_dir}/{filename_prefix}{today_timestamp.strftime(strftime_format)}{extension}"
